@@ -68,10 +68,9 @@ class Monkey:
     logging.addLevelName(PATCH_LEVEL_NUM, "PATCH")
     logging.basicConfig(level=ALIGN_LEVEL_NUM)
     logger = logger_factory(__name__)
-    language_modeler = LanguageModel()
+    language_modeler = LanguageModel(api_model=os.getenv('API_MODEL'))
     # currently only use buffered logger as default
-    function_modeler = FunctionModeler(data_worker=logger)
-
+    function_modeler = FunctionModeler(data_worker=logger, check_for_finetunes=False)
 
     @staticmethod
     def _load_alignments(func_hash: str):
@@ -92,7 +91,7 @@ class Monkey:
         @wraps(test_func)
         def wrapper(*args, **kwargs):
             source = textwrap.dedent(inspect.getsource(test_func))
-            #bytecode = compile(test_func.__code__, "", "exec")
+            # bytecode = compile(test_func.__code__, "", "exec")
             tree = ast.parse(source)
             _locals = locals()
             visitor = AssertionVisitor(_locals, patch_names=Register.function_names_to_patch())
@@ -213,7 +212,7 @@ class Monkey:
                 # if it fails, it's not a json object, try eval
                 try:
                     choice_parsed = eval(output.generated_response)
-                except: 
+                except:
                     choice_parsed = output.generated_response
 
             validator = Validator()
@@ -221,17 +220,21 @@ class Monkey:
             valid = validator.check_type(choice_parsed, function_description.output_type_hint)
 
             if not valid:
-                choice, choice_parsed, successful_repair = repair_output(args, kwargs, function_description, output.generated_response, validator, Monkey.function_modeler, Monkey.language_modeler)
+                choice, choice_parsed, successful_repair = repair_output(args, kwargs, function_description,
+                                                                         output.generated_response, validator,
+                                                                         Monkey.function_modeler,
+                                                                         Monkey.language_modeler)
 
                 if not successful_repair:
-                    raise TypeError(f"Output type was not valid. Expected an object of type {function_description.output_type_hint}, got '{output.generated_response}'")
+                    raise TypeError(
+                        f"Output type was not valid. Expected an object of type {function_description.output_type_hint}, got '{output.generated_response}'")
                 output.generated_response = choice
                 output.distilled_model = False
-                
 
             datapoint = FunctionExample(args, kwargs, output.generated_response)
             if output.suitable_for_finetuning and not output.distilled_model:
-                Monkey.function_modeler.postprocess_datapoint(function_description.__hash__(), function_description, datapoint, repaired = not valid)
+                Monkey.function_modeler.postprocess_datapoint(function_description.__hash__(), function_description,
+                                                              datapoint, repaired=not valid)
 
             instantiated = validator.instantiate(choice_parsed, function_description.output_type_hint)
 
@@ -240,11 +243,10 @@ class Monkey:
         wrapper._is_alignable = True
         Register.add_function(test_func, wrapper)
         return wrapper
-    
+
     @staticmethod
     def configure(**kwargs):
         if "workspace_id" in kwargs:
             Monkey.function_modeler.workspace_id = kwargs["workspace_id"]
         if "check_for_finetunes" in kwargs:
             Monkey.function_modeler.check_for_finetunes = kwargs["check_for_finetunes"]
-            
